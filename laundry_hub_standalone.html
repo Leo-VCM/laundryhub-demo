@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LaundryHub Smart - 完整版展示系統</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: system-ui, -apple-system, sans-serif; }
+        .container { max-width: 480px; margin: 0 auto; background: #f9fafb; min-height: 100vh; }
+        .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+        .notification-toast { position: fixed; top: 20px; right: 20px; max-width: 350px; background: white; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); padding: 16px; z-index: 9999; animation: slideIn 0.3s ease-out; }
+        @keyframes slideIn { from { transform: translateX(400px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        .sms-popup { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: #10b981; color: white; padding: 12px 20px; border-radius: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); animation: bounce 0.5s ease-out; z-index: 9999; }
+        @keyframes bounce { 0%, 100% { transform: translateX(-50%) translateY(0); } 50% { transform: translateX(-50%) translateY(-10px); } }
+    </style>
+</head>
+<body>
+    <div id="app" class="container"></div>
+    <div id="toast-container"></div>
+    <div id="sms-container"></div>
+
+    <script>
+        // ==================== 資料模型 ====================
+        const state = {
+            userType: 'customer',
+            customerTab: 'home',
+            storeTab: 'monitor',
+            language: 'en',
+            weather: 'sunny',
+            hasEvent: false,
+            isHoliday: false,
+            simulationRunning: false,
+            currentHour: new Date().getHours(),
+            showSuccessMessage: false,
+            machines: [],
+            queue: [],
+            notifications: [],
+            smsEnabled: true,
+            pushEnabled: true,
+            userProfile: {
+                name: 'Demo User',
+                phone: '+886-912-345-678',
+                email: 'demo@laundryhub.com',
+                preferences: {
+                    machineType: 'Washer',
+                    temperature: 'Warm',
+                    cycle: 'Normal',
+                    favoriteTime: 'Evening',
+                    notificationMethod: 'both' // 'app', 'sms', 'both'
+                },
+                stats: {
+                    totalUses: 47,
+                    favoriteDay: 'Saturday',
+                    avgPerMonth: 12,
+                    memberSince: '2024-06-15'
+                }
+            },
+            history: [
+                { id: 1, date: '2025-12-06', type: 'Washer', machine: 3, amount: 5.00, duration: 30, invoice: 'INV-2025-1206-001', settings: { temp: 'Warm', cycle: 'Normal' } },
+                { id: 2, date: '2025-12-04', type: 'Dryer', machine: 21, amount: 4.00, duration: 40, invoice: 'INV-2025-1204-002', settings: { temp: 'High', cycle: 'Quick' } },
+                { id: 3, date: '2025-12-01', type: 'Washer', machine: 7, amount: 6.00, duration: 30, invoice: 'INV-2025-1201-003', settings: { temp: 'Cold', cycle: 'Delicate' } }
+            ],
+            predictions: [],
+            environment: { temperature: 24, humidity: 55, airQuality: 'Good', cctvOnline: 4, cctvTotal: 4 }
+        };
+
+        // 翻譯
+        const translations = {
+            en: { 
+                appName: "LaundryHub Smart", 
+                tagline: "AI-Powered Laundry Management", 
+                washers: "Washers", 
+                dryers: "Dryers", 
+                availableNow: "Available now", 
+                joinQueue: "Join Smart Queue", 
+                notifications: "Notifications", 
+                history: "History", 
+                settings: "Settings", 
+                customer: "Customer", 
+                store: "Store",
+                profile: "Profile",
+                preferences: "Preferences",
+                notificationSettings: "Notification Settings",
+                smsNotifications: "SMS Notifications",
+                pushNotifications: "Push Notifications",
+                myPreferences: "My Preferences",
+                machineType: "Machine Type",
+                temperature: "Temperature",
+                cycle: "Cycle",
+                usageStats: "Usage Statistics"
+            },
+            zh: { 
+                appName: "智慧洗衣站", 
+                tagline: "AI智能排隊管理系統", 
+                washers: "洗衣機", 
+                dryers: "烘乾機", 
+                availableNow: "目前可用", 
+                joinQueue: "加入智慧排隊", 
+                notifications: "通知中心", 
+                history: "歷史記錄", 
+                settings: "設定", 
+                customer: "顧客端", 
+                store: "店家端",
+                profile: "個人檔案",
+                preferences: "偏好設定",
+                notificationSettings: "通知設定",
+                smsNotifications: "簡訊通知",
+                pushNotifications: "推播通知",
+                myPreferences: "我的偏好",
+                machineType: "機器類型",
+                temperature: "溫度",
+                cycle: "洗滌模式",
+                usageStats: "使用統計"
+            },
+            es: { 
+                appName: "LaundryHub Inteligente", 
+                tagline: "Gestión con IA", 
+                washers: "Lavadoras", 
+                dryers: "Secadoras", 
+                availableNow: "Disponible", 
+                joinQueue: "Unirse", 
+                notifications: "Notificaciones", 
+                history: "Historial", 
+                settings: "Configuración", 
+                customer: "Cliente", 
+                store: "Tienda",
+                profile: "Perfil",
+                preferences: "Preferencias",
+                notificationSettings: "Notificaciones",
+                smsNotifications: "SMS",
+                pushNotifications: "Push",
+                myPreferences: "Mis Preferencias",
+                machineType: "Tipo",
+                temperature: "Temperatura",
+                cycle: "Ciclo",
+                usageStats: "Estadísticas"
+            },
+            ja: { 
+                appName: "ランドリーハブ", 
+                tagline: "AI搭載管理", 
+                washers: "洗濯機", 
+                dryers: "乾燥機", 
+                availableNow: "利用可能", 
+                joinQueue: "参加", 
+                notifications: "通知", 
+                history: "履歴", 
+                settings: "設定", 
+                customer: "お客様", 
+                store: "店舗",
+                profile: "プロフィール",
+                preferences: "設定",
+                notificationSettings: "通知設定",
+                smsNotifications: "SMS通知",
+                pushNotifications: "プッシュ通知",
+                myPreferences: "設定",
+                machineType: "機械タイプ",
+                temperature: "温度",
+                cycle: "サイクル",
+                usageStats: "統計"
+            }
+        };
+
+        // ==================== 通知系統 ====================
+        function showToast(title, message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const colors = {
+                success: 'bg-green-50 border-green-500',
+                warning: 'bg-yellow-50 border-yellow-500',
+                info: 'bg-blue-50 border-blue-500',
+                error: 'bg-red-50 border-red-500'
+            };
+            const icons = {
+                success: '✓',
+                warning: '⚠',
+                info: 'ℹ',
+                error: '✕'
+            };
+            
+            const toast = document.createElement('div');
+            toast.className = `notification-toast border-l-4 ${colors[type]}`;
+            toast.innerHTML = `
+                <div class="flex items-start">
+                    <div class="text-2xl mr-3">${icons[type]}</div>
+                    <div class="flex-1">
+                        <p class="font-bold text-sm">${title}</p>
+                        <p class="text-xs text-gray-600 mt-1">${message}</p>
+                        <p class="text-xs text-gray-400 mt-2">${new Date().toLocaleTimeString()}</p>
+                    </div>
+                </div>
+            `;
+            
+            container.appendChild(toast);
+            
+            // Play notification sound (simulation)
+            if (state.pushEnabled) {
+                console.log('🔔 Push Notification:', title);
+            }
+            
+            setTimeout(() => {
+                toast.style.animation = 'slideOut 0.3s ease-in';
+                setTimeout(() => toast.remove(), 300);
+            }, 4000);
+        }
+
+        function showSMS(message) {
+            if (!state.smsEnabled) return;
+            
+            const container = document.getElementById('sms-container');
+            const sms = document.createElement('div');
+            sms.className = 'sms-popup';
+            sms.innerHTML = `
+                <div class="flex items-center">
+                    <svg class="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z"/>
+                        <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z"/>
+                    </svg>
+                    <span class="text-sm font-semibold">📱 SMS: ${message}</span>
+                </div>
+            `;
+            
+            container.appendChild(sms);
+            console.log('📱 SMS Sent to', state.userProfile.phone, ':', message);
+            
+            setTimeout(() => sms.remove(), 3000);
+        }
+
+        // 初始化機器
+        function initMachines() {
+            const machines = [];
+            for (let i = 1; i <= 18; i++) {
+                machines.push({
+                    id: i, type: 'Washer', status: Math.random() > 0.6 ? 'using' : 'available',
+                    remaining: Math.random() > 0.6 ? Math.floor(Math.random() * 30) + 5 : 0,
+                    user: Math.random() > 0.6 ? `Customer ${i}` : null,
+                    iot: { vibration: Math.floor(Math.random() * 30) + 70, waterTemp: Math.floor(Math.random() * 20) + 40, powerUsage: Math.floor(Math.random() * 500) + 1500, status: Math.random() > 0.95 ? 'warning' : 'normal' }
+                });
+            }
+            for (let i = 19; i <= 40; i++) {
+                machines.push({
+                    id: i, type: 'Dryer', status: Math.random() > 0.5 ? 'using' : 'available',
+                    remaining: Math.random() > 0.5 ? Math.floor(Math.random() * 40) + 5 : 0,
+                    user: Math.random() > 0.5 ? `Customer ${i}` : null,
+                    iot: { vibration: Math.floor(Math.random() * 25) + 80, airTemp: Math.floor(Math.random() * 30) + 60, powerUsage: Math.floor(Math.random() * 800) + 2000, status: Math.random() > 0.95 ? 'warning' : 'normal' }
+                });
+            }
+            return machines;
+        }
+
+        // 生成預測
+        function generatePredictions(weather, hasEvent, isHoliday) {
+            const preds = [];
+            for (let h = 0; h < 24; h++) {
+                let base = h < 7 ? 2 : h < 9 ? 12 : h < 12 ? 15 : h < 14 ? 12 : h < 17 ? 18 : h < 20 ? 25 : 10;
+                if (weather === 'rainy') base = Math.floor(base * 1.3);
+                if (hasEvent && h >= 10 && h < 18) base = Math.floor(base * 1.2);
+                if (isHoliday) base = Math.floor(base * 1.25);
+                preds.push({ hour: `${h.toString().padStart(2, '0')}:00`, predicted: base, actual: h <= new Date().getHours() ? base + Math.floor(Math.random() * 3) - 1 : null });
+            }
+            return preds;
+        }
+
+        function calculatePrice(predicted) {
+            const base = 5;
+            if (predicted > 25) return (base * 1.2).toFixed(2);
+            if (predicted < 10) return (base * 0.8).toFixed(2);
+            return base.toFixed(2);
+        }
+
+        function assignMachine(machineType) {
+            const available = state.machines.filter(m => m.type === machineType && (m.status === 'available' || m.status === 'using') && m.iot.status === 'normal').sort((a, b) => {
+                if (a.status === 'available') return -1;
+                if (b.status === 'available') return 1;
+                return a.remaining - b.remaining;
+            });
+            if (available.length === 0) return null;
+            return { machineId: available[0].id, estimatedWait: available[0].status === 'available' ? 0 : available[0].remaining };
+        }
+
+        function joinQueue(machineType) {
+            const assignment = assignMachine(machineType);
+            if (!assignment) return;
+            
+            const customer = { id: Date.now(), name: 'You', machineType, joinedAt: new Date().toLocaleTimeString(), assignedMachine: assignment.machineId, estimatedWait: assignment.estimatedWait };
+            state.queue.push(customer);
+            state.showSuccessMessage = true;
+            setTimeout(() => { state.showSuccessMessage = false; render(); }, 3000);
+            
+            const notifMsg = `Assigned to ${machineType} #${assignment.machineId}. Wait: ${assignment.estimatedWait} min`;
+            state.notifications.push({ id: Date.now(), type: 'success', title: 'Queue Joined', message: notifMsg, time: new Date().toLocaleTimeString() });
+            
+            showToast('✓ Queue Joined', notifMsg, 'success');
+            showSMS(`LaundryHub: Queue joined! ${machineType} #${assignment.machineId}, Wait ${assignment.estimatedWait}min`);
+            
+            if (assignment.estimatedWait === 0) {
+                state.machines = state.machines.map(m => m.id === assignment.machineId ? { ...m, status: 'using', remaining: machineType === 'Washer' ? 30 : 40, user: 'You' } : m);
+                state.queue = state.queue.filter(q => q.id !== customer.id);
+            }
+            render();
+        }
+
+        function remoteFix(machineId) {
+            state.machines = state.machines.map(m => m.id === machineId ? { ...m, iot: { ...m.iot, status: 'normal', vibration: 85, waterTemp: 50, airTemp: 70, powerUsage: 1800 } } : m);
+            state.notifications.push({ id: Date.now(), type: 'success', title: 'Remote Fix Applied', message: `Machine #${machineId} has been reset`, time: new Date().toLocaleTimeString() });
+            showToast('✓ Machine Fixed', `Machine #${machineId} remotely diagnosed and reset`, 'success');
+            render();
+        }
+
+        function savePreference(key, value) {
+            state.userProfile.preferences[key] = value;
+            showToast('✓ Preference Saved', `${key} set to ${value}`, 'success');
+            render();
+        }
+
+        // ==================== UI 組件 ====================
+        function CustomerHome() {
+            const t = translations[state.language];
+            const availableWashers = state.machines.filter(m => m.type === 'Washer' && m.status === 'available').length;
+            const availableDryers = state.machines.filter(m => m.type === 'Dryer' && m.status === 'available').length;
+            const predicted = state.predictions[state.currentHour]?.predicted || 15;
+            const price = calculatePrice(predicted);
+            const isPeak = predicted > 25;
+            const isOffPeak = predicted < 10;
+
+            return `
+                <div class="space-y-4 p-4 pb-20">
+                    <div class="bg-gradient-to-r from-blue-500 to-blue-600 text-white p-6 rounded-lg">
+                        <h2 class="text-2xl font-bold mb-2">${t.appName}</h2>
+                        <p class="text-blue-100">${t.tagline}</p>
+                        <p class="text-sm mt-2 text-blue-100">👋 Hello, ${state.userProfile.name}</p>
+                    </div>
+                    ${state.showSuccessMessage ? '<div class="bg-green-50 border border-green-200 p-4 rounded-lg animate-pulse"><p class="text-green-800 font-semibold text-center">✓ Successfully joined queue!</p></div>' : ''}
+                    <div class="p-4 rounded-lg border-2 ${isPeak ? 'bg-red-50 border-red-300' : isOffPeak ? 'bg-green-50 border-green-300' : 'bg-blue-50 border-blue-300'}">
+                        <div class="flex items-center justify-between">
+                            <div><p class="font-bold text-lg">$${price}</p><p class="text-xs">${isPeak ? '⚡ Peak +20%' : isOffPeak ? '🎉 Off-Peak -20%' : 'Standard'}</p></div>
+                            <div><p class="text-xs text-gray-600">Demand</p><p class="font-semibold">${predicted}</p></div>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="bg-white p-4 rounded-lg shadow border-l-4 border-blue-500">
+                            <p class="text-sm text-gray-600 mb-1">${t.washers}</p>
+                            <p class="text-2xl font-bold text-blue-600">${availableWashers}/18</p>
+                            <p class="text-xs text-gray-500">${t.availableNow}</p>
+                        </div>
+                        <div class="bg-white p-4 rounded-lg shadow border-l-4 border-green-500">
+                            <p class="text-sm text-gray-600 mb-1">${t.dryers}</p>
+                            <p class="text-2xl font-bold text-green-600">${availableDryers}/22</p>
+                            <p class="text-xs text-gray-500">${t.availableNow}</p>
+                        </div>
+                    </div>
+                    <div class="bg-white p-4 rounded-lg shadow">
+                        <h3 class="font-semibold mb-3 flex items-center">
+                            <span class="mr-2">⚡</span> Live Status
+                        </h3>
+                        <div class="space-y-2 max-h-48 overflow-y-auto">
+                            ${state.machines.filter(m => m.status === 'using').slice(0, 6).map(m => `
+                                <div class="flex items-center justify-between p-2 bg-gray-50 rounded text-sm">
+                                    <span>${m.type} #${m.id}</span>
+                                    <span class="text-blue-600 font-semibold">${m.remaining} min left</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                    <div class="bg-white p-4 rounded-lg shadow">
+                        <h3 class="font-semibold mb-3">${t.joinQueue}</h3>
+                        <p class="text-xs text-gray-600 mb-3">📍 Using your preferences: ${state.userProfile.preferences.machineType} • ${state.userProfile.preferences.temperature}</p>
+                        <div class="grid grid-cols-2 gap-3">
+                            <button onclick="joinQueue('Washer')" class="bg-blue-500 text-white py-3 rounded-lg font-semibold hover:bg-blue-600">
+                                <div class="text-lg">🧺</div><div class="text-sm">${t.washers}</div><div class="text-xs opacity-90">$${price}</div>
+                            </button>
+                            <button onclick="joinQueue('Dryer')" class="bg-green-500 text-white py-3 rounded-lg font-semibold hover:bg-green-600">
+                                <div class="text-lg">🌀</div><div class="text-sm">${t.dryers}</div><div class="text-xs opacity-90">$${price}</div>
+                            </button>
+                        </div>
+                    </div>
+                    ${state.queue.filter(q => q.name === 'You').map(q => `
+                        <div class="bg-yellow-50 border-2 border-yellow-300 p-4 rounded-lg">
+                            <h3 class="font-semibold mb-2 text-yellow-900">Your Queue Status</h3>
+                            <div class="bg-white p-3 rounded flex justify-between">
+                                <div><p class="font-semibold">${q.machineType}</p><p class="text-xs text-gray-600">Machine #${q.assignedMachine}</p></div>
+                                <div class="text-right"><p class="text-xl font-bold text-blue-600">${q.estimatedWait}</p><p class="text-xs text-gray-500">min</p></div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        function CustomerNotifications() {
+            const t = translations[state.language];
+            return `
+                <div class="space-y-4 p-4 pb-20">
+                    <div class="bg-gradient-to-r from-purple-500 to-blue-500 text-white p-4 rounded-lg">
+                        <h2 class="text-xl font-bold flex items-center">
+                            <span class="mr-2">🔔</span> ${t.notifications}
+                        </h2>
+                        <p class="text-sm opacity-90 mt-1">Real-time alerts • SMS + Push enabled</p>
+                    </div>
+                    ${state.notifications.length === 0 ? '<div class="bg-white p-8 rounded-lg shadow text-center"><p class="text-4xl mb-3">🔔</p><p class="text-gray-500">No notifications yet</p></div>' : state.notifications.slice().reverse().map(n => `
+                        <div class="bg-white p-4 rounded-lg shadow border-l-4 ${n.type === 'success' ? 'border-green-500' : n.type === 'warning' ? 'border-yellow-500' : 'border-blue-500'}">
+                            <div class="flex items-start justify-between">
+                                <div class="flex-1">
+                                    <p class="font-semibold text-sm">${n.title}</p>
+                                    <p class="text-xs text-gray-600 mt-1">${n.message}</p>
+                                    <div class="flex gap-2 mt-2">
+                                        ${state.pushEnabled ? '<span class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">📱 Push</span>' : ''}
+                                        ${state.smsEnabled ? '<span class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">💬 SMS</span>' : ''}
+                                    </div>
+                                </div>
+                                <span class="text-xs text-gray-400">${n.time}</span>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        function CustomerHistory() {
+            const t = translations[state.language];
+            const total = state.history.reduce((sum, h) => sum + h.amount, 0);
+            const minutes = state.history.reduce((sum, h) => sum + h.duration, 0);
+            return `
+                <div class="space-y-4 p-4 pb-20">
+                    <div class="bg-gradient-to-r from-green-500 to-emerald-500 text-white p-4 rounded-lg">
+                        <h2 class="text-xl font-bold flex items-center">
+                            <span class="mr-2">📄</span> ${t.history}
+                        </h2>
+                    </div>
+                    <div class="bg-white p-4 rounded-lg shadow">
+                        <h3 class="font-semibold mb-3">This Month Summary</h3>
+                        <div class="grid grid-cols-3 gap-4 text-center">
+                            <div><p class="text-2xl font-bold text-blue-500">${state.history.length}</p><p class="text-xs text-gray-600">Uses</p></div>
+                            <div><p class="text-2xl font-bold text-green-500">$${total.toFixed(2)}</p><p class="text-xs text-gray-600">Spent</p></div>
+                            <div><p class="text-2xl font-bold text-purple-500">${minutes}</p><p class="text-xs text-gray-600">Minutes</p></div>
+                        </div>
+                    </div>
+                    <div class="bg-white p-4 rounded-lg shadow">
+                        <h3 class="font-semibold mb-3">📝 Transaction History</h3>
+                        ${state.history.map(r => `
+                            <div class="p-3 border rounded-lg mb-2 hover:bg-gray-50">
+                                <div class="flex justify-between mb-2">
+                                    <div>
+                                        <p class="font-semibold text-sm">${r.type} #${r.machine}</p>
+                                        <p class="text-xs text-gray-600">${r.date}</p>
+                                        ${r.settings ? `<p class="text-xs text-blue-600 mt-1">⚙️ ${r.settings.temp} • ${r.settings.cycle}</p>` : ''}
+                                    </div>
+                                    <span class="text-sm font-bold text-green-600">$${r.amount.toFixed(2)}</span>
+                                </div>
+                                <div class="flex justify-between text-xs items-center">
+                                    <span class="text-gray-500">${r.duration} min</span>
+                                    <button onclick="alert('Invoice: ${r.invoice}\\nEmail sent to ${state.userProfile.email}')" class="text-blue-600 hover:underline">📄 ${r.invoice}</button>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        function CustomerProfile() {
+            const t = translations[state.language];
+            const p = state.userProfile;
+            return `
+                <div class="space-y-4 p-4 pb-20">
+                    <div class="bg-gradient-to-r from-indigo-500 to-purple-500 text-white p-6 rounded-lg">
+                        <div class="flex items-center mb-3">
+                            <div class="w-16 h-16 bg-white rounded-full flex items-center justify-center text-3xl mr-4">👤</div>
+                            <div>
+                                <h2 class="text-xl font-bold">${p.name}</h2>
+                                <p class="text-sm opacity-90">${p.phone}</p>
+                                <p class="text-xs opacity-75">${p.email}</p>
+                            </div>
+                        </div>
+                        <div class="bg-white/20 rounded-lg p-3 mt-3">
+                            <p class="text-xs opacity-90">Member Since</p>
+                            <p class="font-semibold">${p.stats.memberSince}</p>
+                        </div>
+                    </div>
+
+                    <div class="bg-white p-4 rounded-lg shadow">
+                        <h3 class="font-semibold mb-3">${t.usageStats}</h3>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="bg-blue-50 p-3 rounded-lg">
+                                <p class="text-2xl font-bold text-blue-600">${p.stats.totalUses}</p>
+                                <p class="text-xs text-gray-600">Total Uses</p>
+                            </div>
+                            <div class="bg-green-50 p-3 rounded-lg">
+                                <p class="text-2xl font-bold text-green-600">${p.stats.avgPerMonth}</p>
+                                <p class="text-xs text-gray-600">Avg/Month</p>
+                            </div>
+                            <div class="bg-purple-50 p-3 rounded-lg col-span-2">
+                                <p class="text-lg font-bold text-purple-600">Favorite: ${p.stats.favoriteDay}</p>
+                                <p class="text-xs text-gray-600">Most active day</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white p-4 rounded-lg shadow">
+                        <h3 class="font-semibold mb-3">${t.myPreferences}</h3>
+                        <div class="space-y-3">
+                            <div>
+                                <label class="block text-sm font-semibold mb-2">${t.machineType}</label>
+                                <select onchange="savePreference('machineType', this.value)" class="w-full p-2 border rounded">
+                                    <option ${p.preferences.machineType === 'Washer' ? 'selected' : ''}>Washer</option>
+                                    <option ${p.preferences.machineType === 'Dryer' ? 'selected' : ''}>Dryer</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-semibold mb-2">${t.temperature}</label>
+                                <select onchange="savePreference('temperature', this.value)" class="w-full p-2 border rounded">
+                                    <option ${p.preferences.temperature === 'Cold' ? 'selected' : ''}>Cold</option>
+                                    <option ${p.preferences.temperature === 'Warm' ? 'selected' : ''}>Warm</option>
+                                    <option ${p.preferences.temperature === 'Hot' ? 'selected' : ''}>Hot</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-semibold mb-2">${t.cycle}</label>
+                                <select onchange="savePreference('cycle', this.value)" class="w-full p-2 border rounded">
+                                    <option ${p.preferences.cycle === 'Normal' ? 'selected' : ''}>Normal</option>
+                                    <option ${p.preferences.cycle === 'Delicate' ? 'selected' : ''}>Delicate</option>
+                                    <option ${p.preferences.cycle === 'Heavy' ? 'selected' : ''}>Heavy</option>
+                                    <option ${p.preferences.cycle === 'Quick' ? 'selected' : ''}>Quick</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="mt-4 p-3 bg-blue-50 rounded-lg">
+                            <p class="text-xs text-blue-800">💡 These preferences will be used for quick booking</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function CustomerSettings() {
+            const t = translations[state.language];
+            return `
+                <div class="space-y-4 p-4 pb-20">
+                    <div class="bg-gradient-to-r from-gray-700 to-gray-800 text-white p-4 rounded-lg">
+                        <h2 class="text-xl font-bold flex items-center">
+                            <span class="mr-2">⚙️</span> ${t.settings}
+                        </h2>
+                    </div>
+
+                    <div class="bg-white p-4 rounded-lg shadow">
+                        <h3 class="font-semibold mb-3 flex items-center">
+                            <span class="mr-2">🔔</span> ${t.notificationSettings}
+                        </h3>
+                        <div class="space-y-3">
+                            <label class="flex items-center justify-between p-3 bg-gray-50 rounded-lg cursor-pointer">
+                                <div class="flex items-center">
+                                    <span class="text-2xl mr-3">📱</span>
+                                    <div>
+                                        <p class="font-semibold text-sm">${t.pushNotifications}</p>
+                                        <p class="text-xs text-gray-600">App notifications</p>
+                                    </div>
+                                </div>
+                                <input type="checkbox" ${state.pushEnabled ? 'checked' : ''} onchange="togglePush()" class="w-5 h-5" />
+                            </label>
+                            <label class="flex items-center justify-between p-3 bg-gray-50 rounded-lg cursor-pointer">
+                                <div class="flex items-center">
+                                    <span class="text-2xl mr-3">💬</span>
+                                    <div>
+                                        <p class="font-semibold text-sm">${t.smsNotifications}</p>
+                                        <p class="text-xs text-gray-600">${state.userProfile.phone}</p>
+                                    </div>
+                                </div>
+                                <input type="checkbox" ${state.smsEnabled ? 'checked' : ''} onchange="toggleSMS()" class="w-5 h-5" />
+                            </label>
+                        </div>
+                        <div class="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                            <p class="text-xs text-yellow-800">⚠️ SMS rates apply: $0.50 per message</p>
+                        </div>
+                    </div>
+
+                    <div class="bg-white p-4 rounded-lg shadow">
+                        <h3 class="font-semibold mb-3 flex items-center">
+                            <span class="mr-2">🌐</span> ${t.language}
+                        </h3>
+                        <div class="space-y-2">
+                            ${Object.entries(translations).map(([code, trans]) => `
+                                <button onclick="setLanguage('${code}')" class="w-full p-3 rounded-lg border-2 text-left ${state.language === code ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'}">
+                                    <div class="flex justify-between items-center">
+                                        <div>
+                                            <p class="font-semibold">${trans.appName}</p>
+                                            <p class="text-xs text-gray-600">${trans.tagline}</p>
+                                        </div>
+                                        ${state.language === code ? '<span class="text-2xl">✓</span>' : ''}
+                                    </div>
+                                </button>
+                            `).join('')}
+                        </div>
+                    </div>
+
+                    <div class="bg-blue-50 border border-blue-200 p-4 rounded-lg">
+                        <p class="text-sm text-blue-800 flex items-center">
+                            <span class="mr-2">🔒</span> All data is encrypted and secure
+                        </p>
+                    </div>
+                </div>
+            `;
+        }
+
+        function StoreMonitor() {
+            const washers = state.machines.filter(m => m.type === 'Washer');
+            const dryers = state.machines.filter(m => m.type === 'Dryer');
+            const warnings = state.machines.filter(m => m.iot.status === 'warning');
+            return `
+                <div class="space-y-4 p-4 pb-20">
+                    <div class="grid grid-cols-4 gap-2">
+                        <div class="bg-blue-50 p-3 rounded-lg border"><p class="text-xl font-bold text-blue-600">18</p><p class="text-xs">Washers</p></div>
+                        <div class="bg-green-50 p-3 rounded-lg border"><p class="text-xl font-bold text-green-600">22</p><p class="text-xs">Dryers</p></div>
+                        <div class="bg-red-50 p-3 rounded-lg border"><p class="text-xl font-bold text-red-600">${warnings.length}</p><p class="text-xs">⚠ Warnings</p></div>
+                        <div class="bg-purple-50 p-3 rounded-lg border"><p class="text-xl font-bold text-purple-600">${state.queue.length}</p><p class="text-xs">In Queue</p></div>
+                    </div>
+
+                    <div class="bg-white p-4 rounded-lg shadow">
+                        <h3 class="font-semibold mb-3 flex items-center">
+                            <span class="mr-2">🛡️</span> Environment & Security
+                        </h3>
+                        <div class="grid grid-cols-2 gap-3 text-sm">
+                            <div class="bg-blue-50 p-2 rounded"><p class="text-xs text-gray-600">Temperature</p><p class="font-semibold">${state.environment.temperature.toFixed(1)}°C</p></div>
+                            <div class="bg-green-50 p-2 rounded"><p class="text-xs text-gray-600">Humidity</p><p class="font-semibold">${state.environment.humidity.toFixed(0)}%</p></div>
+                            <div class="bg-purple-50 p-2 rounded"><p class="text-xs text-gray-600">Air Quality</p><p class="font-semibold">${state.environment.airQuality}</p></div>
+                            <div class="bg-gray-50 p-2 rounded"><p class="text-xs text-gray-600">CCTV</p><p class="font-semibold">${state.environment.cctvOnline}/${state.environment.cctvTotal}</p></div>
+                        </div>
+                    </div>
+
+                    ${warnings.length > 0 ? `<div class="bg-red-50 border-2 border-red-300 p-4 rounded-lg"><h3 class="font-semibold mb-2 text-red-800 flex items-center"><span class="mr-2">⚠️</span> Maintenance Alerts</h3>${warnings.map(m => `<div class="bg-white p-2 rounded mb-2 flex justify-between items-center"><div><p class="font-semibold text-sm">${m.type} #${m.id}</p><p class="text-xs text-gray-600">${m.iot.vibration > 120 ? '⚠ High vibration' : ''}</p></div><button onclick="remoteFix(${m.id})" class="bg-blue-500 text-white px-3 py-1 rounded text-xs hover:bg-blue-600">Remote Fix</button></div>`).join('')}</div>` : ''}
+
+                    <div class="bg-white p-4 rounded-lg shadow">
+                        <h3 class="font-semibold mb-3">Washers (18) - ${washers.filter(m => m.status === 'available').length} available</h3>
+                        <div class="grid grid-cols-6 gap-1">${washers.map(m => `<div class="aspect-square rounded flex flex-col items-center justify-center text-xs ${m.iot.status === 'warning' ? 'bg-red-200 border-2 border-red-500' : m.status === 'available' ? 'bg-green-100' : 'bg-red-100'}"><div class="font-bold">#${m.id}</div>${m.status === 'using' ? `<div class="text-[10px]">${m.remaining}m</div>` : ''}</div>`).join('')}</div>
+                    </div>
+
+                    <div class="bg-white p-4 rounded-lg shadow">
+                        <h3 class="font-semibold mb-3">Dryers (22) - ${dryers.filter(m => m.status === 'available').length} available</h3>
+                        <div class="grid grid-cols-6 gap-1">${dryers.map(m => `<div class="aspect-square rounded flex flex-col items-center justify-center text-xs ${m.iot.status === 'warning' ? 'bg-red-200 border-2 border-red-500' : m.status === 'available' ? 'bg-green-100' : 'bg-red-100'}"><div class="font-bold">#${m.id}</div>${m.status === 'using' ? `<div class="text-[10px]">${m.remaining}m</div>` : ''}</div>`).join('')}</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function StoreQueue() {
+            return `
+                <div class="space-y-4 p-4 pb-20">
+                    <div class="bg-white p-4 rounded-lg shadow">
+                        <h3 class="font-semibold mb-3 flex items-center">
+                            <span class="mr-2">👥</span> On-Site Queue (${state.queue.length})
+                        </h3>
+                        ${state.queue.length === 0 ? '<p class="text-center text-gray-500 py-4">No customers in queue</p>' : state.queue.map((q, i) => `
+                            <div class="p-3 border rounded-lg bg-gray-50 mb-2">
+                                <div class="flex justify-between">
+                                    <div class="flex items-start">
+                                        <div class="bg-blue-500 text-white w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm mr-3">${i + 1}</div>
+                                        <div><p class="font-semibold">${q.name}</p><p class="text-xs text-gray-600">${q.machineType} • ${q.joinedAt}</p><p class="text-xs text-blue-600 font-semibold mt-1">→ Machine #${q.assignedMachine}</p></div>
+                                    </div>
+                                    <div class="text-right"><p class="text-lg font-bold text-blue-600">${q.estimatedWait}</p><p class="text-xs text-gray-500">min</p></div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        function StoreAnalytics() {
+            return `
+                <div class="space-y-4 p-4 pb-20">
+                    <div class="bg-gradient-to-r from-purple-500 to-blue-500 text-white p-4 rounded-lg">
+                        <h3 class="font-semibold mb-3 flex items-center">
+                            <span class="mr-2">📊</span> ML Prediction Engine
+                        </h3>
+                        <div class="grid grid-cols-3 gap-2 mb-3">
+                            <button onclick="toggleWeather()" class="py-2 rounded text-sm font-semibold ${state.weather === 'rainy' ? 'bg-blue-400' : 'bg-white/20'}">${state.weather === 'rainy' ? '🌧 Rainy' : '☀️ Sunny'}</button>
+                            <button onclick="toggleEvent()" class="py-2 rounded text-sm font-semibold ${state.hasEvent ? 'bg-yellow-400 text-gray-800' : 'bg-white/20'}">${state.hasEvent ? '🎉 Event' : '📅 Normal'}</button>
+                            <button onclick="toggleHoliday()" class="py-2 rounded text-sm font-semibold ${state.isHoliday ? 'bg-red-400' : 'bg-white/20'}">${state.isHoliday ? '🏖 Holiday' : '📚 Workday'}</button>
+                        </div>
+                        <button onclick="toggleSimulation()" class="w-full py-2 rounded-lg font-semibold ${state.simulationRunning ? 'bg-red-500' : 'bg-white text-purple-600'}">${state.simulationRunning ? '⏸ Stop' : '▶ Start'} Simulation</button>
+                        ${state.simulationRunning ? `<p class="text-sm mt-2 text-center">Hour: ${state.currentHour}:00 • 5s = 1hr</p>` : ''}
+                    </div>
+
+                    <div class="bg-white p-4 rounded-lg shadow">
+                        <h3 class="font-semibold mb-3 flex items-center">
+                            <span class="mr-2">💲</span> Dynamic Pricing (24hr)
+                        </h3>
+                        <div class="space-y-1 max-h-64 overflow-y-auto text-sm">${state.predictions.map((p, i) => {
+                            const price = calculatePrice(p.predicted);
+                            const isPeak = p.predicted > 25;
+                            const isOffPeak = p.predicted < 10;
+                            return `<div class="flex justify-between p-2 rounded ${i === state.currentHour && state.simulationRunning ? 'bg-yellow-50' : ''}"><span class="${i === state.currentHour && state.simulationRunning ? 'font-bold' : ''}">${p.hour}</span><span class="text-gray-600">${p.predicted} ppl</span><span class="font-semibold ${isPeak ? 'text-red-600' : isOffPeak ? 'text-green-600' : 'text-blue-600'}">${price}</span><span class="text-xs">${isPeak ? '⚡ +20%' : isOffPeak ? '🎉 -20%' : '—'}</span></div>`;
+                        }).join('')}</div>
+                    </div>
+
+                    <div class="bg-gradient-to-r from-purple-50 to-blue-50 p-4 rounded-lg border border-purple-200">
+                        <h3 class="font-semibold mb-2 text-purple-800 flex items-center">
+                            <span class="mr-2">🤖</span> AI Recommendations
+                        </h3>
+                        <ul class="text-sm space-y-1 text-purple-700">
+                            <li>• Smart queue assigns fastest machines automatically</li>
+                            <li>• Weather: ${state.weather === 'rainy' ? 'Rainy day boosts traffic +30%' : 'Normal weather conditions'}</li>
+                            <li>• ${state.machines.filter(m => m.iot.status === 'warning').length > 0 ? `${state.machines.filter(m => m.iot.status === 'warning').length} machines need attention` : 'All machines operating normally'}</li>
+                            <li>• Notifications: ${state.pushEnabled ? '✓ Push' : '✗ Push'} ${state.smsEnabled ? '✓ SMS' : '✗ SMS'}</li>
+                        </ul>
+                    </div>
+                </div>
+            `;
+        }
+
+        // ==================== 主渲染函數 ====================
+        function render() {
+            const t = translations[state.language];
+            let content = '';
+
+            if (state.userType === 'customer') {
+                if (state.customerTab === 'home') content = CustomerHome();
+                else if (state.customerTab === 'notifications') content = CustomerNotifications();
+                else if (state.customerTab === 'history') content = CustomerHistory();
+                else if (state.customerTab === 'profile') content = CustomerProfile();
+                else if (state.customerTab === 'settings') content = CustomerSettings();
+            } else {
+                if (state.storeTab === 'monitor') content = StoreMonitor();
+                else if (state.storeTab === 'queue') content = StoreQueue();
+                else if (state.storeTab === 'analytics') content = StoreAnalytics();
+            }
+
+            const navButtons = state.userType === 'customer' ? `
+                <button onclick="setCustomerTab('home')" class="flex flex-col items-center p-2 ${state.customerTab === 'home' ? 'text-blue-500' : 'text-gray-500'}">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+                    <span class="text-xs mt-1">Home</span>
+                </button>
+                <button onclick="setCustomerTab('notifications')" class="flex flex-col items-center p-2 relative ${state.customerTab === 'notifications' ? 'text-blue-500' : 'text-gray-500'}">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
+                    ${state.notifications.length > 0 ? `<span class="absolute top-1 right-1 bg-red-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center">${state.notifications.length}</span>` : ''}
+                    <span class="text-xs mt-1">Alerts</span>
+                </button>
+                <button onclick="setCustomerTab('history')" class="flex flex-col items-center p-2 ${state.customerTab === 'history' ? 'text-blue-500' : 'text-gray-500'}">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                    <span class="text-xs mt-1">History</span>
+                </button>
+                <button onclick="setCustomerTab('profile')" class="flex flex-col items-center p-2 ${state.customerTab === 'profile' ? 'text-blue-500' : 'text-gray-500'}">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+                    <span class="text-xs mt-1">Profile</span>
+                </button>
+                <button onclick="setCustomerTab('settings')" class="flex flex-col items-center p-2 ${state.customerTab === 'settings' ? 'text-blue-500' : 'text-gray-500'}">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                    <span class="text-xs mt-1">Settings</span>
+                </button>
+            ` : `
+                <button onclick="setStoreTab('monitor')" class="flex flex-col items-center p-2 ${state.storeTab === 'monitor' ? 'text-purple-500' : 'text-gray-500'}">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                    <span class="text-xs mt-1">Monitor</span>
+                </button>
+                <button onclick="setStoreTab('queue')" class="flex flex-col items-center p-2 ${state.storeTab === 'queue' ? 'text-purple-500' : 'text-gray-500'}">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+                    <span class="text-xs mt-1">Queue</span>
+                </button>
+                <button onclick="setStoreTab('analytics')" class="flex flex-col items-center p-2 ${state.storeTab === 'analytics' ? 'text-purple-500' : 'text-gray-500'}">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+                    <span class="text-xs mt-1">Analytics</span>
+                </button>
+            `;
+
+            document.getElementById('app').innerHTML = `
+                <div class="bg-white p-2 flex gap-2 sticky top-0 z-10 shadow-sm">
+                    <button onclick="setUserType('customer')" class="flex-1 py-2 rounded-lg font-semibold ${state.userType === 'customer' ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-600'}">${t.customer}</button>
+                    <button onclick="setUserType('store')" class="flex-1 py-2 rounded-lg font-semibold ${state.userType === 'store' ? 'bg-purple-500 text-white' : 'bg-gray-100 text-gray-600'}">${t.store}</button>
+                </div>
+                ${content}
+                <div class="fixed bottom-0 left-0 right-0 bg-white border-t max-w-md mx-auto">
+                    <div class="flex justify-around p-2">${navButtons}</div>
+                </div>
+            `;
+        }
+
+        // ==================== 事件處理 ====================
+        window.setUserType = (type) => { state.userType = type; render(); };
+        window.setCustomerTab = (tab) => { state.customerTab = tab; render(); };
+        window.setStoreTab = (tab) => { state.storeTab = tab; render(); };
+        window.setLanguage = (lang) => { state.language = lang; showToast('✓ Language Changed', `Switched to ${translations[lang].appName}`, 'success'); render(); };
+        window.toggleWeather = () => { state.weather = state.weather === 'sunny' ? 'rainy' : 'sunny'; state.predictions = generatePredictions(state.weather, state.hasEvent, state.isHoliday); render(); };
+        window.toggleEvent = () => { state.hasEvent = !state.hasEvent; state.predictions = generatePredictions(state.weather, state.hasEvent, state.isHoliday); render(); };
+        window.toggleHoliday = () => { state.isHoliday = !state.isHoliday; state.predictions = generatePredictions(state.weather, state.hasEvent, state.isHoliday); render(); };
+        window.toggleSimulation = () => { state.simulationRunning = !state.simulationRunning; render(); };
+        window.togglePush = () => { state.pushEnabled = !state.pushEnabled; showToast(state.pushEnabled ? '✓ Push Enabled' : '✗ Push Disabled', state.pushEnabled ? 'You will receive app notifications' : 'Push notifications turned off', state.pushEnabled ? 'success' : 'warning'); render(); };
+        window.toggleSMS = () => { state.smsEnabled = !state.smsEnabled; showToast(state.smsEnabled ? '✓ SMS Enabled' : '✗ SMS Disabled', state.smsEnabled ? `SMS will be sent to ${state.userProfile.phone}` : 'SMS notifications turned off', state.smsEnabled ? 'success' : 'warning'); render(); };
+
+        // ==================== 初始化 ====================
+        state.machines = initMachines();
+        state.predictions = generatePredictions(state.weather, state.hasEvent, state.isHoliday);
+
+        // 機器倒數計時與通知
+        setInterval(() => {
+            state.machines = state.machines.map(m => {
+                if (m.status === 'using' && m.remaining > 0) {
+                    const newRemaining = m.remaining - 1;
+                    
+                    if (newRemaining === 2 && m.user === 'You') {
+                        const msg = `${m.type} #${m.id} will finish in 2 minutes`;
+                        state.notifications.push({ id: Date.now(), type: 'warning', title: `⏰ ${m.type} Almost Done`, message: msg, time: new Date().toLocaleTimeString() });
+                        showToast('⏰ Almost Done', msg, 'warning');
+                        showSMS(`LaundryHub: Your ${m.type} #${m.id} finishes in 2min!`);
+                    }
+                    
+                    if (newRemaining === 0) {
+                        if (m.user === 'You') {
+                            const msg = `${m.type} #${m.id} is ready! Please collect your laundry`;
+                            state.notifications.push({ id: Date.now(), type: 'success', title: '✓ Completed!', message: msg, time: new Date().toLocaleTimeString() });
+                            showToast('✓ Laundry Complete', msg, 'success');
+                            showSMS(`LaundryHub: ${m.type} #${m.id} complete! Please collect.`);
+                            
+                            const price = calculatePrice(state.predictions[state.currentHour]?.predicted || 15);
+                            state.history.unshift({ 
+                                id: Date.now(), 
+                                date: new Date().toLocaleDateString(), 
+                                type: m.type, 
+                                machine: m.id, 
+                                amount: parseFloat(price), 
+                                duration: m.type === 'Washer' ? 30 : 40, 
+                                invoice: `INV-${Date.now()}`,
+                                settings: { temp: state.userProfile.preferences.temperature, cycle: state.userProfile.preferences.cycle }
+                            });
+                        }
+                        
+                        const nextInQueue = state.queue.find(q => q.machineType === m.type);
+                        if (nextInQueue) {
+                            if (nextInQueue.name === 'You') {
+                                const msg = `Your turn! ${m.type} #${m.id} is ready`;
+                                state.notifications.push({ id: Date.now(), type: 'info', title: '🎉 Your Turn!', message: msg, time: new Date().toLocaleTimeString() });
+                                showToast('🎉 Your Turn!', msg, 'info');
+                                showSMS(`LaundryHub: Your turn! ${m.type} #${m.id} ready now.`);
+                            }
+                            state.queue = state.queue.filter(q => q.id !== nextInQueue.id);
+                            return { ...m, status: 'using', remaining: m.type === 'Washer' ? 30 : 40, user: nextInQueue.name };
+                        } else {
+                            return { ...m, status: 'available', remaining: 0, user: null };
+                        }
+                    }
+                    return { ...m, remaining: newRemaining };
+                }
+                return m;
+            });
+            
+            state.environment.temperature = Math.max(20, Math.min(30, state.environment.temperature + (Math.random() - 0.5) * 0.5));
+            state.environment.humidity = Math.max(40, Math.min(70, state.environment.humidity + (Math.random() - 0.5) * 2));
+            render();
+        }, 1000);
+
+        // 模擬循環
+        setInterval(() => {
+            if (state.simulationRunning) {
+                state.currentHour = (state.currentHour + 1) % 24;
+                const predicted = state.predictions[state.currentHour].predicted;
+                const newCustomers = Math.floor(predicted * 0.3);
+                
+                for (let i = 0; i < newCustomers; i++) {
+                    setTimeout(() => {
+                        const machineType = Math.random() > 0.45 ? 'Washer' : 'Dryer';
+                        const assignment = assignMachine(machineType);
+                        if (assignment && assignment.estimatedWait === 0) {
+                            state.machines = state.machines.map(m => m.id === assignment.machineId ? { ...m, status: 'using', remaining: machineType === 'Washer' ? 30 : 40, user: `Auto-${Date.now()}` } : m);
+                        } else if (assignment) {
+                            state.queue.push({ id: Date.now() + i, name: `Customer ${Date.now() + i}`, machineType, joinedAt: new Date().toLocaleTimeString(), assignedMachine: assignment.machineId, estimatedWait: assignment.estimatedWait });
+                        }
+                        render();
+                    }, i * 200);
+                }
+            }
+        }, 5000);
+
+        // 初始歡迎通知
+        setTimeout(() => {
+            showToast('👋 Welcome!', 'Welcome to LaundryHub Smart - Your AI-powered laundry assistant', 'info');
+        }, 1000);
+
+        render();
+    </script>
+</body>
+</html>
